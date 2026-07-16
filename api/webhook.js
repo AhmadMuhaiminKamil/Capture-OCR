@@ -1,11 +1,12 @@
 import { createWorker } from 'tesseract.js';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TESSERACT_CORE_PATH   = path.join(__dirname, "tesseract.js-core");
-const TESSERACT_LANG_PATH   = path.join(__dirname, "lang-data");
-const TESSERACT_WORKER_PATH = path.join(__dirname, "../node_modules/tesseract.js/src/worker-script/node/index.js");
+const TESSERACT_CORE_PATH   = path.join(process.cwd(), "api", "tesseract.js-core");
+const TESSERACT_LANG_PATH   = path.join(process.cwd(), "api", "lang-data");
+const TESSERACT_WORKER_PATH = path.join(process.cwd(), "node_modules", "tesseract.js", "src", "worker-script", "node", "index.js");
 
 // ── KONFIGURASI ──────────────────────────
 const BOT_TOKEN         = process.env.BOT_TOKEN;
@@ -224,6 +225,10 @@ async function handleUpdate(update) {
 
 // ── VERCEL HANDLER ───────────────────────
 export default async function handler(req, res) {
+  console.log("cwd:", process.cwd());
+  console.log("__dirname:", path.dirname(fileURLToPath(import.meta.url)));
+  console.log("corePath exists:", fs.existsSync(TESSERACT_CORE_PATH));
+  console.log("langPath exists:", fs.existsSync(TESSERACT_LANG_PATH));
   if (req.method !== 'POST') {
     return res.status(200).json({ ok: true, message: 'WorkLog Bot is running! 🤖' });
   }
