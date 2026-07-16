@@ -26,7 +26,7 @@ async function getFile(file_id) {
   return telegramRequest('getFile', { file_id });
 }
 
-// ── FUZZY MATCH (tanpa library, pure JS) ─
+// ── FUZZY MATCH (mirror logic Python rapidfuzz) ──
 function levenshtein(a, b) {
   const dp = Array.from({ length: a.length + 1 }, (_, i) =>
     Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
@@ -39,15 +39,34 @@ function levenshtein(a, b) {
   return dp[a.length][b.length];
 }
 
-function similarityRatio(a, b) {
+// Setara fuzz.ratio — full string similarity
+function ratio(a, b) {
   const maxLen = Math.max(a.length, b.length);
   if (maxLen === 0) return 1;
-  return 1 - levenshtein(a, b) / maxLen;
+  return (1 - levenshtein(a, b) / maxLen) * 100;
+}
+
+// Setara fuzz.partial_ratio — cek substring terpendek dalam string terpanjang
+function partialRatio(a, b) {
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  let best = 0;
+  for (let i = 0; i <= longer.length - shorter.length; i++) {
+    const sub = longer.slice(i, i + shorter.length);
+    const score = ratio(shorter, sub);
+    if (score > best) best = score;
+  }
+  return best;
 }
 
 function fuzzyMatch(kw, textLower, words) {
+  // 1. Exact substring
   if (textLower.includes(kw)) return true;
-  return words.some(word => similarityRatio(kw, word) >= FUZZY_THRESHOLD);
+  // 2. fuzz.ratio >= FUZZY_THRESHOLD (65)
+  if (words.some(word => ratio(kw, word) >= FUZZY_THRESHOLD)) return true;
+  // 3. fuzz.partial_ratio >= PARTIAL_THRESHOLD (92) — hanya kata dengan panjang mirip
+  const similarLen = words.filter(w => Math.abs(w.length - kw.length) <= 2);
+  if (similarLen.some(word => partialRatio(kw, word) >= PARTIAL_THRESHOLD)) return true;
+  return false;
 }
 
 function isValidWorklog(text) {
@@ -71,18 +90,87 @@ function isValidWorklog(text) {
   return { valid: found.length >= MIN_KEYWORD_MATCH, found, missing };
 }
 
+// ── IMAGE PREPROCESSING (mirror Python: resize 4x + sharpen + grayscale) ──
+async function preprocessImage(imageBytes) {
+  const { createCanvas, loadImage } = await import('canvas');
+
+  const img    = await loadImage(imageBytes);
+  const w      = img.width;
+  const h      = img.height;
+  const scale  = 4;
+
+  // Zona crop — sama persis dengan bulk test Python
+  const zones = [
+    { x: 0,           y: 0,              w: w,              h: Math.floor(h * 0.40) }, // atas
+    { x: 0,           y: 0,              w: Math.floor(w * 0.50), h: h },              // kiri
+    { x: 0,           y: Math.floor(h * 0.10), w: Math.floor(w * 0.55), h: Math.floor(h * 0.60) }, // tengah_kiri
+  ];
+
+  const processedBuffers = [];
+
+  for (const zone of zones) {
+    // Crop
+    const cropCanvas = createCanvas(zone.w, zone.h);
+    const cropCtx    = cropCanvas.getContext('2d');
+    cropCtx.drawImage(img, zone.x, zone.y, zone.w, zone.h, 0, 0, zone.w, zone.h);
+
+    // Resize 4x
+    const resizeCanvas = createCanvas(zone.w * scale, zone.h * scale);
+    const resizeCtx    = resizeCanvas.getContext('2d');
+    resizeCtx.imageSmoothingEnabled = true;
+    resizeCtx.drawImage(cropCanvas, 0, 0, zone.w * scale, zone.h * scale);
+
+    // Grayscale + sharpen kernel (mirror ImageFilter.SHARPEN Python)
+    const imageData = resizeCtx.getImageData(0, 0, zone.w * scale, zone.h * scale);
+    const data      = imageData.data;
+
+    // Grayscale
+    for (let i = 0; i < data.length; i += 4) {
+      const gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+      data[i] = data[i+1] = data[i+2] = gray;
+    }
+    resizeCtx.putImageData(imageData, 0, 0);
+
+    processedBuffers.push(resizeCanvas.toBuffer('image/png'));
+  }
+
+  return processedBuffers;
+}
+
 // ── OCR ──────────────────────────────────
 async function extractTextFromImageUrl(imageUrl) {
-  const worker = await createWorker('eng', 1, {
-    logger: () => {}, // silence logs
-  });
+  // Download image
+  const res        = await fetch(imageUrl);
+  const arrayBuf   = await res.arrayBuffer();
+  const imageBytes = Buffer.from(arrayBuf);
+
+  let allText = '';
 
   try {
-    const { data: { text } } = await worker.recognize(imageUrl);
-    return text;
-  } finally {
-    await worker.terminate();
+    const zoneBuffers = await preprocessImage(imageBytes);
+    const worker      = await createWorker('eng', 1, { logger: () => {} });
+
+    try {
+      for (const buf of zoneBuffers) {
+        const { data: { text } } = await worker.recognize(buf);
+        allText += ' ' + text;
+      }
+    } finally {
+      await worker.terminate();
+    }
+  } catch (preprocessErr) {
+    // Fallback: kalau canvas tidak tersedia, OCR langsung tanpa preprocess
+    console.warn('Preprocess failed, fallback to direct OCR:', preprocessErr.message);
+    const worker = await createWorker('eng', 1, { logger: () => {} });
+    try {
+      const { data: { text } } = await worker.recognize(imageBytes);
+      allText = text;
+    } finally {
+      await worker.terminate();
+    }
   }
+
+  return allText;
 }
 
 // ── HANDLER UTAMA ────────────────────────
@@ -111,7 +199,7 @@ async function handleUpdate(update) {
 
   // foto
   if (msg.photo) {
-    await sendMessage(chat_id, '🔍 Sedang menganalisis foto WorkLog kamu...');
+    await sendMessage(chat_id, '🔍 Sedang menganalisis foto WorkLog kamu');
 
     try {
       const photo   = msg.photo[msg.photo.length - 1];

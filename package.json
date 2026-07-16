@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "tesseract.js": "^5.0.5"
+    "tesseract.js": "^5.0.5",
+    "canvas": "^2.11.2"
   },
   "engines": {
     "node": ">=18"
