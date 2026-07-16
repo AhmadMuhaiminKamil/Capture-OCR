@@ -1,3 +1,5 @@
 node_modules/
 api/tesseract.js-core/
+api/tesseract-src/
 api/lang-data/
+api/node_modules/
