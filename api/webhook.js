@@ -3,9 +3,9 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TESSERACT_CORE_PATH   = path.join(__dirname, '../node_modules/tesseract.js-core');
-const TESSERACT_LANG_PATH   = path.join(__dirname, '../node_modules/tesseract.js/lang-data');
-const TESSERACT_WORKER_PATH = path.join(__dirname, '../node_modules/tesseract.js/src/worker-script/node/index.js');
+const TESSERACT_CORE_PATH   = path.join(__dirname, "tesseract.js-core");
+const TESSERACT_LANG_PATH   = path.join(__dirname, "lang-data");
+const TESSERACT_WORKER_PATH = path.join(__dirname, "../node_modules/tesseract.js/src/worker-script/node/index.js");
 
 // ── KONFIGURASI ──────────────────────────
 const BOT_TOKEN         = process.env.BOT_TOKEN;
