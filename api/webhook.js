@@ -1,11 +1,19 @@
 import { createWorker } from 'tesseract.js';
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TESSERACT_CORE_PATH   = path.join(__dirname, '../node_modules/tesseract.js-core');
+const TESSERACT_LANG_PATH   = path.join(__dirname, '../node_modules/tesseract.js/lang-data');
+const TESSERACT_WORKER_PATH = path.join(__dirname, '../node_modules/tesseract.js/src/worker-script/node/index.js');
 
 // ── KONFIGURASI ──────────────────────────
 const BOT_TOKEN         = process.env.BOT_TOKEN;
 const REQUIRED_KEYWORDS = ['worklog', 'summary', 'record'];
 const WORKLOG_ALT       = ['agentnote', 'agentno', 'attachment'];
 const MIN_KEYWORD_MATCH = 2;
-const FUZZY_THRESHOLD   = 0.65;
+const FUZZY_THRESHOLD   = 65;
+const PARTIAL_THRESHOLD = 92;
 const MIN_WORD_LENGTH   = 4;
 
 // ── TELEGRAM API HELPER ──────────────────
@@ -26,7 +34,7 @@ async function getFile(file_id) {
   return telegramRequest('getFile', { file_id });
 }
 
-// ── FUZZY MATCH (mirror logic Python rapidfuzz) ──
+// ── FUZZY MATCH ───────────────────────────
 function levenshtein(a, b) {
   const dp = Array.from({ length: a.length + 1 }, (_, i) =>
     Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
@@ -39,33 +47,27 @@ function levenshtein(a, b) {
   return dp[a.length][b.length];
 }
 
-// Setara fuzz.ratio — full string similarity
 function ratio(a, b) {
   const maxLen = Math.max(a.length, b.length);
-  if (maxLen === 0) return 1;
+  if (maxLen === 0) return 100;
   return (1 - levenshtein(a, b) / maxLen) * 100;
 }
 
-// Setara fuzz.partial_ratio — cek substring terpendek dalam string terpanjang
 function partialRatio(a, b) {
   const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
   let best = 0;
   for (let i = 0; i <= longer.length - shorter.length; i++) {
-    const sub = longer.slice(i, i + shorter.length);
-    const score = ratio(shorter, sub);
+    const score = ratio(shorter, longer.slice(i, i + shorter.length));
     if (score > best) best = score;
   }
   return best;
 }
 
 function fuzzyMatch(kw, textLower, words) {
-  // 1. Exact substring
   if (textLower.includes(kw)) return true;
-  // 2. fuzz.ratio >= FUZZY_THRESHOLD (65)
-  if (words.some(word => ratio(kw, word) >= FUZZY_THRESHOLD)) return true;
-  // 3. fuzz.partial_ratio >= PARTIAL_THRESHOLD (92) — hanya kata dengan panjang mirip
+  if (words.some(w => ratio(kw, w) >= FUZZY_THRESHOLD)) return true;
   const similarLen = words.filter(w => Math.abs(w.length - kw.length) <= 2);
-  if (similarLen.some(word => partialRatio(kw, word) >= PARTIAL_THRESHOLD)) return true;
+  if (similarLen.some(w => partialRatio(kw, w) >= PARTIAL_THRESHOLD)) return true;
   return false;
 }
 
@@ -90,20 +92,18 @@ function isValidWorklog(text) {
   return { valid: found.length >= MIN_KEYWORD_MATCH, found, missing };
 }
 
-// ── IMAGE PREPROCESSING (mirror Python: resize 4x + grayscale, crop 3 zona) ──
+// ── IMAGE PREPROCESSING ───────────────────
 async function preprocessImage(imageBytes) {
   const sharp = (await import('sharp')).default;
-  const img   = sharp(imageBytes);
-  const meta  = await img.metadata();
+  const meta  = await sharp(imageBytes).metadata();
   const w     = meta.width;
   const h     = meta.height;
   const scale = 4;
 
-  // Zona crop — sama persis dengan bulk test Python
   const zones = [
-    { left: 0, top: 0,                  width: w,                    height: Math.floor(h * 0.40) }, // atas
-    { left: 0, top: 0,                  width: Math.floor(w * 0.50), height: h },                    // kiri
-    { left: 0, top: Math.floor(h*0.10), width: Math.floor(w * 0.55), height: Math.floor(h * 0.50) }, // tengah_kiri
+    { left: 0, top: 0,                  width: w,                    height: Math.floor(h * 0.40) },
+    { left: 0, top: 0,                  width: Math.floor(w * 0.50), height: h },
+    { left: 0, top: Math.floor(h*0.10), width: Math.floor(w * 0.55), height: Math.floor(h * 0.50) },
   ];
 
   const buffers = [];
@@ -112,7 +112,7 @@ async function preprocessImage(imageBytes) {
       .extract(zone)
       .resize(zone.width * scale, zone.height * scale)
       .sharpen()
-      .sharpen() // 2x sharpen seperti Python
+      .sharpen()
       .grayscale()
       .png()
       .toBuffer();
@@ -122,6 +122,15 @@ async function preprocessImage(imageBytes) {
 }
 
 // ── OCR ──────────────────────────────────
+async function makeWorker() {
+  return createWorker('eng', 1, {
+    logger: () => {},
+    corePath: TESSERACT_CORE_PATH,
+    langPath: TESSERACT_LANG_PATH,
+    workerPath: TESSERACT_WORKER_PATH,
+  });
+}
+
 async function extractTextFromImageUrl(imageUrl) {
   const res        = await fetch(imageUrl);
   const arrayBuf   = await res.arrayBuffer();
@@ -131,7 +140,7 @@ async function extractTextFromImageUrl(imageUrl) {
 
   try {
     const zoneBuffers = await preprocessImage(imageBytes);
-    const worker      = await createWorker('eng', 1, { logger: () => {} });
+    const worker      = await makeWorker();
     try {
       for (const buf of zoneBuffers) {
         const { data: { text } } = await worker.recognize(buf);
@@ -142,7 +151,7 @@ async function extractTextFromImageUrl(imageUrl) {
     }
   } catch (err) {
     console.warn('Preprocess failed, fallback direct OCR:', err.message);
-    const worker = await createWorker('eng', 1, { logger: () => {} });
+    const worker = await makeWorker();
     try {
       const { data: { text } } = await worker.recognize(imageBytes);
       allText = text;
@@ -151,88 +160,65 @@ async function extractTextFromImageUrl(imageUrl) {
     }
   }
 
+  console.log('OCR result:', allText);
   return allText;
 }
 
-// ── HANDLER UTAMA ────────────────────────
+// ── TELEGRAM HANDLER ─────────────────────
 async function handleUpdate(update) {
-  const msg     = update.message;
+  const msg = update.message;
   if (!msg) return;
 
   const chat_id = msg.chat.id;
 
-  // /start
   if (msg.text === '/start') {
     await sendMessage(chat_id,
-      '👋 Halo\\! Saya bot pengecekan *WorkLog*\\.\n\n' +
-      'Kirimkan foto screenshot WorkLog kamu\\.\n\n' +
-      'Gunakan /cek untuk memulai\\.',
-      'MarkdownV2'
+      '👋 Halo! Saya bot pengecekan *WorkLog*.\n\nKirimkan foto screenshot WorkLog kamu.\n\nGunakan /cek untuk memulai.'
     );
     return;
   }
 
-  // /cek
   if (msg.text === '/cek') {
     await sendMessage(chat_id, '📸 Silakan kirim foto screenshot WorkLog kamu sekarang.');
     return;
   }
 
-  // foto
   if (msg.photo) {
-    await sendMessage(chat_id, '🔍 Sedang menganalisis foto WorkLog kamu');
+    await sendMessage(chat_id, '🔍 Sedang menganalisis foto WorkLog kamu...');
 
     try {
-      const photo   = msg.photo[msg.photo.length - 1];
-      const fileRes = await getFile(photo.file_id);
-      const filePath = fileRes.result.file_path;
-      const imageUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
-
-      const rawText = await extractTextFromImageUrl(imageUrl);
-      console.log('OCR result:', rawText);
-
+      const photo    = msg.photo[msg.photo.length - 1];
+      const fileRes  = await getFile(photo.file_id);
+      const imageUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${fileRes.result.file_path}`;
+      const rawText  = await extractTextFromImageUrl(imageUrl);
       const { valid, found, missing } = isValidWorklog(rawText);
 
       if (valid) {
         const foundStr = found.map(k => `\`${k}\``).join(', ');
         await sendMessage(chat_id,
-          `✅ *WorkLog VALID\\!*\n\nElemen terdeteksi: ${foundStr}\n\nTerima kasih\\! 👍`,
-          'MarkdownV2'
+          `✅ *WorkLog VALID!*\n\nElemen terdeteksi: ${foundStr}\n\nTerima kasih! 👍`
         );
       } else {
         const missingStr = missing.map(k => `\`${k}\``).join(', ');
         const foundStr   = found.length ? found.map(k => `\`${k}\``).join(', ') : 'tidak ada';
         await sendMessage(chat_id,
-          `❌ *WorkLog TIDAK VALID\\.*\n\n` +
-          `Terdeteksi: ${foundStr}\n` +
-          `Tidak ditemukan: ${missingStr}\n\n` +
-          `⚠️ Kirim foto WorkLog yang jelas & lengkap\\.\n` +
-          `Gunakan /cek untuk coba lagi\\.`,
-          'MarkdownV2'
+          `❌ *WorkLog TIDAK VALID.*\n\nTerdeteksi: ${foundStr}\nTidak ditemukan: ${missingStr}\n\n⚠️ Kirim foto WorkLog yang jelas & lengkap.\nGunakan /cek untuk coba lagi.`
         );
       }
     } catch (err) {
       console.error('OCR error:', err);
-      await sendMessage(chat_id, '❌ Gagal membaca gambar\\. Coba lagi\\.', 'MarkdownV2');
+      await sendMessage(chat_id, '❌ Gagal membaca gambar. Coba lagi.');
     }
     return;
   }
 
-  // dokumen
   if (msg.document) {
-    await sendMessage(chat_id,
-      '📎 Kirim sebagai *foto* ya, bukan file\\.\nGunakan /cek untuk memulai\\.',
-      'MarkdownV2'
-    );
+    await sendMessage(chat_id, '📎 Kirim sebagai *foto* ya, bukan file.\nGunakan /cek untuk memulai.');
     return;
   }
 
-  // teks biasa
   if (msg.text) {
-    await sendMessage(chat_id,
-      '📸 Kirim *foto* WorkLog kamu ya\\.\nGunakan /cek untuk memulai\\.',
-      'MarkdownV2'
-    );
+    await sendMessage(chat_id, '📸 Kirim *foto* WorkLog kamu ya.\nGunakan /cek untuk memulai.');
   }
 }
 
@@ -248,6 +234,5 @@ export default async function handler(req, res) {
     console.error('Handler error:', err);
   }
 
-  // Selalu return 200 ke Telegram supaya tidak retry
   res.status(200).json({ ok: true });
 }
