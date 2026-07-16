@@ -1,9 +1,8 @@
-import { createWorker } from 'tesseract.js';
-import { fileURLToPath } from 'url';
-import path from 'path';
-import fs from 'fs';
+'use strict';
+const { createWorker } = require('tesseract.js');
+const path = require('path');
+const fs   = require('fs');
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TESSERACT_CORE_PATH   = path.join(process.cwd(), 'api', 'tesseract.js-core');
 const TESSERACT_LANG_PATH   = path.join(process.cwd(), 'api', 'lang-data');
 const TESSERACT_WORKER_PATH = path.join(process.cwd(), 'api', '_worker', 'worker-script', 'node', 'index.js');
@@ -95,7 +94,7 @@ function isValidWorklog(text) {
 
 // ── IMAGE PREPROCESSING ───────────────────
 async function preprocessImage(imageBytes) {
-  const sharp = (await import('sharp')).default;
+  const sharp = require('sharp');
   const meta  = await sharp(imageBytes).metadata();
   const w     = meta.width;
   const h     = meta.height;
@@ -186,7 +185,6 @@ async function handleUpdate(update) {
 
   if (msg.photo) {
     await sendMessage(chat_id, '🔍 Sedang menganalisis foto WorkLog kamu...');
-
     try {
       const photo    = msg.photo[msg.photo.length - 1];
       const fileRes  = await getFile(photo.file_id);
@@ -224,11 +222,12 @@ async function handleUpdate(update) {
 }
 
 // ── VERCEL HANDLER ───────────────────────
-export default async function handler(req, res) {
-  console.log("cwd:", process.cwd());
-  console.log("__dirname:", path.dirname(fileURLToPath(import.meta.url)));
-  console.log("corePath exists:", fs.existsSync(TESSERACT_CORE_PATH));
-  console.log("langPath exists:", fs.existsSync(TESSERACT_LANG_PATH));
+module.exports = async function handler(req, res) {
+  console.log('cwd:', process.cwd());
+  console.log('corePath exists:', fs.existsSync(TESSERACT_CORE_PATH));
+  console.log('langPath exists:', fs.existsSync(TESSERACT_LANG_PATH));
+  console.log('workerPath exists:', fs.existsSync(TESSERACT_WORKER_PATH));
+
   if (req.method !== 'POST') {
     return res.status(200).json({ ok: true, message: 'WorkLog Bot is running! 🤖' });
   }
@@ -240,4 +239,4 @@ export default async function handler(req, res) {
   }
 
   res.status(200).json({ ok: true });
-}
+};

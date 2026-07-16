@@ -1,10 +1,9 @@
-import fs from 'fs';
-import path from 'path';
-import https from 'https';
-import { fileURLToPath } from 'url';
+'use strict';
+const fs    = require('fs');
+const path  = require('path');
+const https = require('https');
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root      = path.join(__dirname, '..');
+const root = path.join(__dirname, '..');
 
 // 1. Copy tesseract.js-core ke api/tesseract.js-core
 const coreSrc  = path.join(root, 'node_modules', 'tesseract.js-core');
@@ -16,8 +15,7 @@ for (const file of fs.readdirSync(coreSrc)) {
 }
 console.log('Copied tesseract.js-core');
 
-// 2. Copy tesseract.js-core ke api/_core (untuk require resolution dari worker)
-// Pakai nama _core bukan node_modules agar tidak trigger Vercel build ulang
+// 2. Copy tesseract.js-core ke api/_core
 const altCoreDest = path.join(root, 'api', '_core');
 if (fs.existsSync(altCoreDest)) fs.rmSync(altCoreDest, { recursive: true });
 fs.mkdirSync(altCoreDest, { recursive: true });
@@ -37,20 +35,25 @@ console.log('Copied tesseract worker src');
 const langDest = path.join(root, 'api', 'lang-data');
 if (!fs.existsSync(langDest)) fs.mkdirSync(langDest, { recursive: true });
 const langFile = path.join(langDest, 'eng.traineddata.gz');
+
 if (fs.existsSync(langFile)) {
   console.log('eng.traineddata.gz already exists, skipping.');
-} else {
-  console.log('Downloading eng.traineddata.gz...');
-  await new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(langFile);
-    const download = (url) => https.get(url, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) return download(res.headers.location);
-      res.pipe(file);
-      file.on('finish', () => { file.close(); resolve(); });
-    }).on('error', (err) => { fs.unlinkSync(langFile); reject(err); });
-    download('https://github.com/naptha/tessdata/blob/gh-pages/4.0.0/eng.traineddata.gz?raw=true');
-  });
-  console.log('Downloaded eng.traineddata.gz');
+  return;
 }
 
-console.log('✅ All files ready!');
+console.log('Downloading eng.traineddata.gz...');
+const download = (url) => new Promise((resolve, reject) => {
+  const file = fs.createWriteStream(langFile);
+  https.get(url, (res) => {
+    if (res.statusCode === 301 || res.statusCode === 302) {
+      file.close();
+      return download(res.headers.location).then(resolve).catch(reject);
+    }
+    res.pipe(file);
+    file.on('finish', () => { file.close(); resolve(); });
+  }).on('error', (err) => { try { fs.unlinkSync(langFile); } catch(_){} reject(err); });
+});
+
+download('https://github.com/naptha/tessdata/blob/gh-pages/4.0.0/eng.traineddata.gz?raw=true')
+  .then(() => console.log('✅ All files ready!'))
+  .catch(err => { console.error('Download failed:', err); process.exit(1); });

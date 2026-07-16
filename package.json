@@ -2,9 +2,8 @@
   "name": "worklog-bot",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
   "scripts": {
-    "vercel-build": "npm install && node scripts/copy-wasm.mjs && mkdir -p public"
+    "vercel-build": "npm install && node scripts/copy-wasm.cjs && mkdir -p public"
   },
   "dependencies": {
     "tesseract.js": "^5.0.5",
