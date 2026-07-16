@@ -20,7 +20,7 @@ try {
 
 // ── PATCH: copy lang-data ke node_modules/tesseract.js/lang-data ──
 const langSrc  = path.join(process.cwd(), 'api', 'lang-data');
-const langDest = path.join(process.cwd(), 'node_modules', 'tesseract.js', 'lang-data');
+const langDest = '/tmp/tessdata';
 try {
   if (fs.existsSync(langSrc) && !fs.existsSync(path.join(langDest, 'eng.traineddata.gz'))) {
     if (!fs.existsSync(langDest)) fs.mkdirSync(langDest, { recursive: true });
@@ -160,7 +160,7 @@ async function extractTextFromImageUrl(imageUrl) {
 
   try {
     const zoneBuffers = await preprocessImage(imageBytes);
-    const worker      = await createWorker('eng');
+    const worker      = await createWorker('eng', 1, { logger: () => {}, langPath: langDest });
     try {
       for (const buf of zoneBuffers) {
         const { data: { text } } = await worker.recognize(buf);
@@ -171,7 +171,7 @@ async function extractTextFromImageUrl(imageUrl) {
     }
   } catch (err) {
     console.warn('Preprocess failed, fallback direct OCR:', err.message);
-    const worker = await createWorker('eng');
+    const worker = await createWorker('eng', 1, { logger: () => {}, langPath: langDest });
     try {
       const { data: { text } } = await worker.recognize(imageBytes);
       allText = text;
@@ -211,6 +211,7 @@ async function handleUpdate(update) {
       const imageUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${fileRes.result.file_path}`;
       const rawText  = await extractTextFromImageUrl(imageUrl);
       const { valid, found, missing } = isValidWorklog(rawText);
+      console.log('Validation:', { valid, found, missing });
 
       if (valid) {
         const foundStr = found.map(k => `\`${k}\``).join(', ');
