@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: worklog-bot
+    runtime: python
+    buildCommand: apt-get install -y tesseract-ocr && pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: RENDER_URL
+        sync: false
