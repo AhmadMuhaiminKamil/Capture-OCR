@@ -1,0 +1,12 @@
+{
+  "name": "worklog-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "tesseract.js": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
