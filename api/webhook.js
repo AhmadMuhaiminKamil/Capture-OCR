@@ -39,10 +39,11 @@ const { createWorker } = require('tesseract.js');
 // ── KONFIGURASI ──────────────────────────
 const BOT_TOKEN         = process.env.BOT_TOKEN;
 const REQUIRED_KEYWORDS = ['worklog', 'summary', 'record'];
+const RECORD_ALT = ['reoor', 'recor', 'reoord', 'created', 'description', 'desc'];
 const WORKLOG_ALT       = ['agentnote', 'agentno', 'attachment'];
 const MIN_KEYWORD_MATCH = 2;
-const FUZZY_THRESHOLD   = 65;
-const PARTIAL_THRESHOLD = 92;
+const FUZZY_THRESHOLD   = 55;
+const PARTIAL_THRESHOLD = 80;
 const MIN_WORD_LENGTH   = 4;
 
 // ── TELEGRAM API HELPER ──────────────────
@@ -110,6 +111,13 @@ function isValidWorklog(text) {
     (fuzzyMatch(kw, textLower, words) ? found : missing).push(kw);
   }
 
+  if (missing.includes('record')) {
+    const recAlt = RECORD_ALT.find(kw => fuzzyMatch(kw, textLower, words));
+    if (recAlt) {
+      found.push(`record~${recAlt}`);
+      missing.splice(missing.indexOf('record'), 1);
+    }
+  }
   if (missing.includes('worklog')) {
     const altFound = WORKLOG_ALT.find(kw => fuzzyMatch(kw, textLower, words));
     if (altFound) {
