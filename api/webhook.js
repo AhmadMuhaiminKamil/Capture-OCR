@@ -90,56 +90,39 @@ function isValidWorklog(text) {
   return { valid: found.length >= MIN_KEYWORD_MATCH, found, missing };
 }
 
-// ── IMAGE PREPROCESSING (mirror Python: resize 4x + sharpen + grayscale) ──
+// ── IMAGE PREPROCESSING (mirror Python: resize 4x + grayscale, crop 3 zona) ──
 async function preprocessImage(imageBytes) {
-  const { createCanvas, loadImage } = await import('canvas');
-
-  const img    = await loadImage(imageBytes);
-  const w      = img.width;
-  const h      = img.height;
-  const scale  = 4;
+  const sharp = (await import('sharp')).default;
+  const img   = sharp(imageBytes);
+  const meta  = await img.metadata();
+  const w     = meta.width;
+  const h     = meta.height;
+  const scale = 4;
 
   // Zona crop — sama persis dengan bulk test Python
   const zones = [
-    { x: 0,           y: 0,              w: w,              h: Math.floor(h * 0.40) }, // atas
-    { x: 0,           y: 0,              w: Math.floor(w * 0.50), h: h },              // kiri
-    { x: 0,           y: Math.floor(h * 0.10), w: Math.floor(w * 0.55), h: Math.floor(h * 0.60) }, // tengah_kiri
+    { left: 0, top: 0,                  width: w,                    height: Math.floor(h * 0.40) }, // atas
+    { left: 0, top: 0,                  width: Math.floor(w * 0.50), height: h },                    // kiri
+    { left: 0, top: Math.floor(h*0.10), width: Math.floor(w * 0.55), height: Math.floor(h * 0.50) }, // tengah_kiri
   ];
 
-  const processedBuffers = [];
-
+  const buffers = [];
   for (const zone of zones) {
-    // Crop
-    const cropCanvas = createCanvas(zone.w, zone.h);
-    const cropCtx    = cropCanvas.getContext('2d');
-    cropCtx.drawImage(img, zone.x, zone.y, zone.w, zone.h, 0, 0, zone.w, zone.h);
-
-    // Resize 4x
-    const resizeCanvas = createCanvas(zone.w * scale, zone.h * scale);
-    const resizeCtx    = resizeCanvas.getContext('2d');
-    resizeCtx.imageSmoothingEnabled = true;
-    resizeCtx.drawImage(cropCanvas, 0, 0, zone.w * scale, zone.h * scale);
-
-    // Grayscale + sharpen kernel (mirror ImageFilter.SHARPEN Python)
-    const imageData = resizeCtx.getImageData(0, 0, zone.w * scale, zone.h * scale);
-    const data      = imageData.data;
-
-    // Grayscale
-    for (let i = 0; i < data.length; i += 4) {
-      const gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-      data[i] = data[i+1] = data[i+2] = gray;
-    }
-    resizeCtx.putImageData(imageData, 0, 0);
-
-    processedBuffers.push(resizeCanvas.toBuffer('image/png'));
+    const buf = await sharp(imageBytes)
+      .extract(zone)
+      .resize(zone.width * scale, zone.height * scale)
+      .sharpen()
+      .sharpen() // 2x sharpen seperti Python
+      .grayscale()
+      .png()
+      .toBuffer();
+    buffers.push(buf);
   }
-
-  return processedBuffers;
+  return buffers;
 }
 
 // ── OCR ──────────────────────────────────
 async function extractTextFromImageUrl(imageUrl) {
-  // Download image
   const res        = await fetch(imageUrl);
   const arrayBuf   = await res.arrayBuffer();
   const imageBytes = Buffer.from(arrayBuf);
@@ -149,7 +132,6 @@ async function extractTextFromImageUrl(imageUrl) {
   try {
     const zoneBuffers = await preprocessImage(imageBytes);
     const worker      = await createWorker('eng', 1, { logger: () => {} });
-
     try {
       for (const buf of zoneBuffers) {
         const { data: { text } } = await worker.recognize(buf);
@@ -158,9 +140,8 @@ async function extractTextFromImageUrl(imageUrl) {
     } finally {
       await worker.terminate();
     }
-  } catch (preprocessErr) {
-    // Fallback: kalau canvas tidak tersedia, OCR langsung tanpa preprocess
-    console.warn('Preprocess failed, fallback to direct OCR:', preprocessErr.message);
+  } catch (err) {
+    console.warn('Preprocess failed, fallback direct OCR:', err.message);
     const worker = await createWorker('eng', 1, { logger: () => {} });
     try {
       const { data: { text } } = await worker.recognize(imageBytes);

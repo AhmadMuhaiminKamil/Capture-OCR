@@ -3,7 +3,7 @@
   "functions": {
     "api/webhook.js": {
       "maxDuration": 60,
-      "includeFiles": "node_modules/tesseract.js-core/**,node_modules/canvas/**"
+      "includeFiles": "node_modules/tesseract.js-core/**,node_modules/sharp/**"
     }
   },
   "routes": [
