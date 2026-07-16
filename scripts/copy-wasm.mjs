@@ -6,35 +6,32 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root      = path.join(__dirname, '..');
 
-// 1. Copy SELURUH node_modules/tesseract.js-core ke api/tesseract.js-core
+// 1. Copy tesseract.js-core ke api/tesseract.js-core
 const coreSrc  = path.join(root, 'node_modules', 'tesseract.js-core');
 const coreDest = path.join(root, 'api', 'tesseract.js-core');
 if (fs.existsSync(coreDest)) fs.rmSync(coreDest, { recursive: true });
 fs.mkdirSync(coreDest, { recursive: true });
 for (const file of fs.readdirSync(coreSrc)) {
   fs.copyFileSync(path.join(coreSrc, file), path.join(coreDest, file));
-  console.log(`Copied core: ${file}`);
 }
+console.log('Copied tesseract.js-core');
 
-// 2. Copy worker script tesseract.js ke api/worker/
-const workerSrcDir = path.join(root, 'node_modules', 'tesseract.js', 'src', 'worker-script', 'node');
-const workerDest   = path.join(root, 'api', 'worker');
-if (fs.existsSync(workerDest)) fs.rmSync(workerDest, { recursive: true });
-fs.cpSync(path.join(root, 'node_modules', 'tesseract.js', 'src'), path.join(root, 'api', 'tesseract-src'), { recursive: true });
-console.log('Copied tesseract.js src');
-
-// 3. Copy node_modules yang dibutuhkan worker ke api/node_modules
-const apiNodeModules = path.join(root, 'api', 'node_modules');
-if (!fs.existsSync(apiNodeModules)) fs.mkdirSync(apiNodeModules, { recursive: true });
-
-// Copy tesseract.js-core ke api/node_modules juga (untuk require resolution)
-const nmCoreDest = path.join(apiNodeModules, 'tesseract.js-core');
-if (fs.existsSync(nmCoreDest)) fs.rmSync(nmCoreDest, { recursive: true });
-fs.mkdirSync(nmCoreDest, { recursive: true });
+// 2. Copy tesseract.js-core ke api/_core (untuk require resolution dari worker)
+// Pakai nama _core bukan node_modules agar tidak trigger Vercel build ulang
+const altCoreDest = path.join(root, 'api', '_core');
+if (fs.existsSync(altCoreDest)) fs.rmSync(altCoreDest, { recursive: true });
+fs.mkdirSync(altCoreDest, { recursive: true });
 for (const file of fs.readdirSync(coreSrc)) {
-  fs.copyFileSync(path.join(coreSrc, file), path.join(nmCoreDest, file));
+  fs.copyFileSync(path.join(coreSrc, file), path.join(altCoreDest, file));
 }
-console.log('Copied tesseract.js-core to api/node_modules');
+console.log('Copied tesseract.js-core to api/_core');
+
+// 3. Copy worker script ke api/_worker/
+const workerSrc  = path.join(root, 'node_modules', 'tesseract.js', 'src');
+const workerDest = path.join(root, 'api', '_worker');
+if (fs.existsSync(workerDest)) fs.rmSync(workerDest, { recursive: true });
+fs.cpSync(workerSrc, workerDest, { recursive: true });
+console.log('Copied tesseract worker src');
 
 // 4. Download eng.traineddata.gz
 const langDest = path.join(root, 'api', 'lang-data');

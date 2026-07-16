@@ -4,7 +4,7 @@
   "functions": {
     "api/webhook.js": {
       "maxDuration": 60,
-      "includeFiles": "api/tesseract.js-core/**,api/tesseract-src/**,api/lang-data/**,api/node_modules/**"
+      "includeFiles": "api/tesseract.js-core/**,api/_core/**,api/_worker/**,api/lang-data/**"
     }
   },
   "routes": [
