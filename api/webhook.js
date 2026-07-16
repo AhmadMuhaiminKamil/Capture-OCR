@@ -111,7 +111,7 @@ async function handleUpdate(update) {
 
   // foto
   if (msg.photo) {
-    await sendMessage(chat_id, '🔍 Sedang menganalisis foto WorkLog kamu\\.\\.\\.');
+    await sendMessage(chat_id, '🔍 Sedang menganalisis foto WorkLog kamu...');
 
     try {
       const photo   = msg.photo[msg.photo.length - 1];
