@@ -1,11 +1,40 @@
 'use strict';
-const { createWorker } = require('tesseract.js');
 const path = require('path');
 const fs   = require('fs');
 
-const TESSERACT_CORE_PATH   = path.join(process.cwd(), 'api', 'tesseract.js-core');
-const TESSERACT_LANG_PATH   = path.join(process.cwd(), 'api', 'lang-data');
-const TESSERACT_WORKER_PATH = path.join(process.cwd(), 'api', '_worker', 'worker-script', 'node', 'index.js');
+// ── PATCH: copy WASM ke node_modules sebelum tesseract.js diload ──
+// Vercel tidak bundle node_modules/tesseract.js-core tapi bundle api/tesseract.js-core
+const wasmSrc  = path.join(process.cwd(), 'api', 'tesseract.js-core');
+const wasmDest = path.join(process.cwd(), 'node_modules', 'tesseract.js-core');
+try {
+  if (fs.existsSync(wasmSrc) && !fs.existsSync(path.join(wasmDest, 'tesseract-core-simd.wasm'))) {
+    if (!fs.existsSync(wasmDest)) fs.mkdirSync(wasmDest, { recursive: true });
+    for (const file of fs.readdirSync(wasmSrc)) {
+      fs.copyFileSync(path.join(wasmSrc, file), path.join(wasmDest, file));
+    }
+    console.log('Patched: WASM copied to node_modules/tesseract.js-core');
+  }
+} catch (e) {
+  console.warn('WASM patch failed:', e.message);
+}
+
+// ── PATCH: copy lang-data ke node_modules/tesseract.js/lang-data ──
+const langSrc  = path.join(process.cwd(), 'api', 'lang-data');
+const langDest = path.join(process.cwd(), 'node_modules', 'tesseract.js', 'lang-data');
+try {
+  if (fs.existsSync(langSrc) && !fs.existsSync(path.join(langDest, 'eng.traineddata.gz'))) {
+    if (!fs.existsSync(langDest)) fs.mkdirSync(langDest, { recursive: true });
+    for (const file of fs.readdirSync(langSrc)) {
+      fs.copyFileSync(path.join(langSrc, file), path.join(langDest, file));
+    }
+    console.log('Patched: lang-data copied to node_modules/tesseract.js/lang-data');
+  }
+} catch (e) {
+  console.warn('Lang patch failed:', e.message);
+}
+
+// Baru load tesseract.js setelah patch
+const { createWorker } = require('tesseract.js');
 
 // ── KONFIGURASI ──────────────────────────
 const BOT_TOKEN         = process.env.BOT_TOKEN;
@@ -122,15 +151,6 @@ async function preprocessImage(imageBytes) {
 }
 
 // ── OCR ──────────────────────────────────
-async function makeWorker() {
-  return createWorker('eng', 1, {
-    logger: () => {},
-    corePath: TESSERACT_CORE_PATH,
-    langPath: TESSERACT_LANG_PATH,
-    workerPath: TESSERACT_WORKER_PATH,
-  });
-}
-
 async function extractTextFromImageUrl(imageUrl) {
   const res        = await fetch(imageUrl);
   const arrayBuf   = await res.arrayBuffer();
@@ -140,7 +160,7 @@ async function extractTextFromImageUrl(imageUrl) {
 
   try {
     const zoneBuffers = await preprocessImage(imageBytes);
-    const worker      = await makeWorker();
+    const worker      = await createWorker('eng');
     try {
       for (const buf of zoneBuffers) {
         const { data: { text } } = await worker.recognize(buf);
@@ -151,7 +171,7 @@ async function extractTextFromImageUrl(imageUrl) {
     }
   } catch (err) {
     console.warn('Preprocess failed, fallback direct OCR:', err.message);
-    const worker = await makeWorker();
+    const worker = await createWorker('eng');
     try {
       const { data: { text } } = await worker.recognize(imageBytes);
       allText = text;
@@ -223,11 +243,6 @@ async function handleUpdate(update) {
 
 // ── VERCEL HANDLER ───────────────────────
 module.exports = async function handler(req, res) {
-  console.log('cwd:', process.cwd());
-  console.log('corePath exists:', fs.existsSync(TESSERACT_CORE_PATH));
-  console.log('langPath exists:', fs.existsSync(TESSERACT_LANG_PATH));
-  console.log('workerPath exists:', fs.existsSync(TESSERACT_WORKER_PATH));
-
   if (req.method !== 'POST') {
     return res.status(200).json({ ok: true, message: 'WorkLog Bot is running! 🤖' });
   }
